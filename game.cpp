@@ -759,6 +759,7 @@ void game::process_events()
 void game::process_activity()
 {
  it_book* reading;
+ item* book_item;
  bool no_recipes;
  if (u.activity.type != ACT_NULL) {
   if (int(turn) % 150 == 0) {
@@ -848,14 +849,30 @@ void game::process_activity()
     break;
 
    case ACT_READ:
-    if (u.activity.index == -2)
-     reading = dynamic_cast<it_book*>(u.weapon.type);
-    else
-     reading = dynamic_cast<it_book*>(u.inv.item_by_letter(u.activity.invlet).type);
+    book_item = &(u.weapon.invlet == u.activity.invlet ?
+                            u.weapon : u.inv.item_by_letter(u.activity.invlet));
+    reading = dynamic_cast<it_book*>(book_item->type);
 
     if (reading->fun != 0) {
-     u.add_morale(MORALE_BOOK, reading->fun * 5, reading->fun * 15, 60, 30,
-                  true, reading);
+        int fun_bonus;
+        if(book_item->charges == 0) {
+            //Book is out of chapters -> re-reading old book, less fun
+            add_msg(_("The %s isn't as much fun now that you've finished it."),
+                    book_item->name.c_str());
+            if(one_in(6)) { //Don't nag incessantly, just once in a while
+                add_msg(_("Maybe you should find something new to read..."));
+            }
+            //50% penalty
+            fun_bonus = (reading->fun * 5) / 2;
+        } else {
+            fun_bonus = reading->fun * 5;
+        }
+        u.add_morale(MORALE_BOOK, fun_bonus,
+                     reading->fun * 15, 60, 30, true, reading);
+    }
+
+    if(book_item->charges > 0) {
+        book_item->charges--;
     }
 
     no_recipes = true;
@@ -1189,7 +1206,7 @@ void game::update_weather()
         weather_segment  new_weather = weather_log.lower_bound((int)nextweather)->second;
         weather = new_weather.weather;
         temperature = new_weather.temperature;
-        nextweather = new_weather.deadline;
+        nextweather = weather_log.upper_bound(int(new_weather.deadline))->second.deadline;
 
         if (weather != old_weather && weather_data[weather].dangerous &&
             levz >= 0 && m.is_outside(u.posx, u.posy))
@@ -2654,6 +2671,11 @@ void game::load(std::string name)
      load_weather(fin);
  }
  fin.close();
+ if ( weather_log.empty() ) { // todo: game::get_default_weather() { based on OPTION["STARTING_SEASON"]
+    weather = WEATHER_CLEAR;
+    temperature = 65;
+    nextweather = int(turn)+300;
+ }
  // log
  std::string mfile = std::string( "save/" + base64_encode(u.name) + ".log" );
  fin.open(mfile.c_str());
@@ -3259,6 +3281,7 @@ Current turn: %d; Next spawn %d.\n\
         weather = (weather_type) selected_weather;
       } else if(weather_menu.ret == -10) {
           uimenu weather_log_menu;
+          weather_log_menu.text = string_format("turn: %d, nextweather: %d",int(turn),int(nextweather));
           for(std::map<int, weather_segment>::const_iterator it = weather_log.begin(); it != weather_log.end(); ++it) {
               weather_log_menu.addentry(-1,true,-1,"%dd%dh %d %s[%d] %d",
                   it->second.deadline.days(),it->second.deadline.hours(),
@@ -4365,6 +4388,39 @@ bool vector_has(std::vector<int> vec, int test)
    return true;
  }
  return false;
+}
+
+bool game::is_hostile_nearby()
+{
+    const int iProxyDist = (OPTIONS["SAFEMODEPROXIMITY"] <= 0) ? 60 : OPTIONS["SAFEMODEPROXIMITY"];
+    for (int i = 0; i < num_zombies(); i++) {
+        monster &z = _active_monsters[i];
+        if (!u_see(&z))
+            continue;
+
+        monster_attitude matt = z.attitude(&u);
+        if (MATT_ATTACK != matt && MATT_FOLLOW != matt)
+            continue;
+
+        int mondist = rl_dist(u.posx, u.posy, z.posx(), z.posy());
+        if (mondist <= iProxyDist)
+            return true;
+    }
+
+    for (int i = 0; i < active_npc.size(); i++) {
+        point npcp(active_npc[i]->posx, active_npc[i]->posy);
+
+        if (!u_see(npcp.x, npcp.y))
+            continue;
+
+        if (active_npc[i]->attitude != NPCATT_KILL)
+            continue;
+
+        if (rl_dist(u.posx, u.posy, npcp.x, npcp.y) <= iProxyDist)
+                return true;
+    }
+
+    return false;
 }
 
 // Print monster info to the given window, and return the lowest row (0-indexed)
@@ -8569,6 +8625,10 @@ void game::plfire(bool burst)
   add_msg(_("Your %s needs 100 charges to fire!"), u.weapon.tname().c_str());
   return;
  }
+ if (u.weapon.has_flag("FIRE_50") && u.weapon.num_charges() < 50) {
+  add_msg(_("Your %s needs 50 charges to fire!"), u.weapon.tname().c_str());
+  return;
+ }
  if (u.weapon.has_flag("USE_UPS") && !u.has_charges("UPS_off", 5) &&
      !u.has_charges("UPS_on", 5) && !u.has_charges("adv_UPS_off", 3) &&
      !u.has_charges("adv_UPS_on", 3)) {
@@ -8672,28 +8732,54 @@ void game::butcher()
   add_msg(_("You don't have a sharp item to butcher with."));
   return;
  }
-// We do it backwards to prevent the deletion of a corpse from corrupting our
-// vector of indices.
- for (int i = corpses.size() - 1; i >= 0; i--) {
-  mtype *corpse = m.i_at(u.posx, u.posy)[corpses[i]].corpse;
-  if (query_yn(_("Butcher the %s corpse?"), corpse->name.c_str())) {
-   int time_to_cut = 0;
-   switch (corpse->size) { // Time in turns to cut up te corpse
-    case MS_TINY:   time_to_cut =  2; break;
-    case MS_SMALL:  time_to_cut =  5; break;
-    case MS_MEDIUM: time_to_cut = 10; break;
-    case MS_LARGE:  time_to_cut = 18; break;
-    case MS_HUGE:   time_to_cut = 40; break;
-   }
-   time_to_cut *= 100; // Convert to movement points
-   time_to_cut += factor * 5; // Penalty for poor tool
-   if (time_to_cut < 250)
-    time_to_cut = 250;
-   u.assign_activity(this, ACT_BUTCHER, time_to_cut, corpses[i]);
-   u.moves = 0;
-   return;
-  }
+
+ if (is_hostile_nearby() &&
+     !query_yn(_("Hostiles are nearby! Start Butchering anyway?")))
+ {
+     return;
  }
+
+ int butcher_corpse_index = 0;
+ if (corpses.size() > 1) {
+     uimenu kmenu;
+     kmenu.text = _("Choose corpse to butcher");
+     kmenu.selected = 0;
+     for (int i = 0; i < corpses.size(); i++) {
+         mtype *corpse = m.i_at(u.posx, u.posy)[corpses[i]].corpse;
+         int hotkey = -1;
+         if (i == 0) {
+             for (std::map<char, action_id>::iterator it = keymap.begin(); it != keymap.end(); it++) {
+                 if (it->second == ACTION_BUTCHER) {
+                     hotkey = (it->first == 'q') ? -1 : it->first;
+                     break;
+                 }
+             }
+         }
+         kmenu.addentry(i, true, hotkey, corpse->name.c_str());
+     }
+     kmenu.addentry(corpses.size(), true, 'q', _("Cancel"));
+     kmenu.query();
+     if (kmenu.ret == corpses.size()) {
+         return;
+     }
+     butcher_corpse_index = kmenu.ret;
+ }
+
+ mtype *corpse = m.i_at(u.posx, u.posy)[corpses[butcher_corpse_index]].corpse;
+ int time_to_cut = 0;
+ switch (corpse->size) { // Time in turns to cut up te corpse
+  case MS_TINY:   time_to_cut =  2; break;
+  case MS_SMALL:  time_to_cut =  5; break;
+  case MS_MEDIUM: time_to_cut = 10; break;
+  case MS_LARGE:  time_to_cut = 18; break;
+  case MS_HUGE:   time_to_cut = 40; break;
+ }
+ time_to_cut *= 100; // Convert to movement points
+ time_to_cut += factor * 5; // Penalty for poor tool
+ if (time_to_cut < 250)
+  time_to_cut = 250;
+ u.assign_activity(this, ACT_BUTCHER, time_to_cut, corpses[butcher_corpse_index]);
+ u.moves = 0;
 }
 
 void game::complete_butcher(int index)
@@ -9283,47 +9369,51 @@ void game::chat()
 }
 
 void game::pldrive(int x, int y) {
- if (run_mode == 2) { // Monsters around and we don't wanna run
-   add_msg(_("Monster spotted--run mode is on! "
-           "(%s to turn it off or %s to ignore monster.)"),
-           press_x(ACTION_TOGGLE_SAFEMODE).c_str(),
-           from_sentence_case(press_x(ACTION_IGNORE_ENEMY)).c_str());
-  return;
- }
- int part = -1;
- vehicle *veh = m.veh_at (u.posx, u.posy, part);
- if (!veh) {
-  dbg(D_ERROR) << "game:pldrive: can't find vehicle! Drive mode is now off.";
-  debugmsg ("game::pldrive error: can't find vehicle! Drive mode is now off.");
-  u.in_vehicle = false;
-  return;
- }
- int pctr = veh->part_with_feature (part, "CONTROLS");
- if (pctr < 0) {
-  add_msg (_("You can't drive the vehicle from here. You need controls!"));
-  return;
- }
+    if (run_mode == 2) { // Monsters around and we don't wanna run
+        add_msg(_("Monster spotted--run mode is on! "
+                    "(%s to turn it off or %s to ignore monster.)"),
+                    press_x(ACTION_TOGGLE_SAFEMODE).c_str(),
+                    from_sentence_case(press_x(ACTION_IGNORE_ENEMY)).c_str());
+        return;
+    }
+    int part = -1;
+    vehicle *veh = m.veh_at (u.posx, u.posy, part);
+    if (!veh) {
+        dbg(D_ERROR) << "game:pldrive: can't find vehicle! Drive mode is now off.";
+        debugmsg ("game::pldrive error: can't find vehicle! Drive mode is now off.");
+        u.in_vehicle = false;
+        return;
+    }
+    int pctr = veh->part_with_feature (part, "CONTROLS");
+    if (pctr < 0) {
+        add_msg (_("You can't drive the vehicle from here. You need controls!"));
+        return;
+    }
 
- int thr_amount = 10 * 100;
- if (veh->cruise_on)
-  veh->cruise_thrust (-y * thr_amount);
- else {
-  veh->thrust (-y);
- }
- veh->turn (15 * x);
- if (veh->skidding && veh->valid_wheel_config()) {
-  if (rng (0, 100) < u.dex_cur + u.skillLevel("driving") * 2) {
-   add_msg (_("You regain control of the %s."), veh->name.c_str());
-   veh->velocity = int(veh->forward_velocity());
-   veh->skidding = false;
-   veh->move.init (veh->turn_dir);
-  }
- }
- // Don't spend turns to adjust cruise speed.
- if( x != 0 || !veh->cruise_on ){ u.moves = 0; }
+    int thr_amount = 10 * 100;
+    if (veh->cruise_on) {
+        veh->cruise_thrust (-y * thr_amount);
+    } else {
+        veh->thrust (-y);
+    }
+    veh->turn (15 * x);
+    if (veh->skidding && veh->valid_wheel_config()) {
+        if (rng (0, veh->velocity) < u.dex_cur + u.skillLevel("driving") * 2) {
+            add_msg (_("You regain control of the %s."), veh->name.c_str());
+            u.practice(turn, "driving", veh->velocity / 5);
+            veh->velocity = int(veh->forward_velocity());
+            veh->skidding = false;
+            veh->move.init (veh->turn_dir);
+        }
+    }
+    // Don't spend turns to adjust cruise speed.
+    if( x != 0 || !veh->cruise_on ) {
+        u.moves = 0;
+    }
 
- if (x != 0 && veh->velocity != 0 && one_in(4))
-     u.practice(turn, "driving", 1);
+    if (x != 0 && veh->velocity != 0 && one_in(10)) {
+        u.practice(turn, "driving", 1);
+    }
 }
 
 void game::plmove(int dx, int dy)

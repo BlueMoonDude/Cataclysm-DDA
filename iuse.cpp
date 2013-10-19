@@ -2913,7 +2913,7 @@ if(it->type->id == "cot"){
   type = tr_bubblewrap;
   practice = 2;
  } else if(it->type->id == "beartrap"){
-  buried = (p->has_amount("shovel", 1) &&
+  buried = ((p->has_amount("shovel", 1) || p->has_amount("e_tool", 1)) &&
             g->m.has_flag("DIGGABLE", posx, posy) &&
             query_yn(_("Bury the beartrap?")));
   type = (buried ? tr_beartrap_buried : tr_beartrap);
@@ -3003,7 +3003,7 @@ if(it->type->id == "cot"){
     return;
   }
  } else if(it->type->id == "landmine"){
-  buried = (p->has_amount("shovel", 1) &&
+  buried = ((p->has_amount("shovel", 1) || p->has_amount("e_tool", 1)) &&
             g->m.has_flag("DIGGABLE", posx, posy) &&
             query_yn(_("Bury the land mine?")));
   type = (buried ? tr_landmine_buried : tr_landmine);
@@ -3014,7 +3014,7 @@ if(it->type->id == "cot"){
  }
 
  if (buried) {
-  if (!p->has_amount("shovel", 1)) {
+  if (!p->has_amount("shovel", 1) && !p->has_amount("e_tool", 1)) {
    g->add_msg_if_player(p,_("You need a shovel."));
    return;
   } else if (!g->m.has_flag("DIGGABLE", posx, posy)) {
@@ -4774,6 +4774,13 @@ void iuse::bullet_puller(game *g, player *p, item *it, bool t)
  gunpowder.make(g->itypes["gunpowder"]);
  gunpowder.charges = 4*multiply;
  lead.charges = 2*multiply;
+ }
+ else if (pull->type->id == "50") {
+ casing.make(g->itypes["50_casing"]);
+ primer.make(g->itypes["lgrifle_primer"]);
+ gunpowder.make(g->itypes["gunpowder"]);
+ gunpowder.charges = 45*multiply;
+ lead.charges = 21*multiply;
  }
  else if (pull->type->id == "556" || pull->type->id == "556_incendiary") {
  casing.make(g->itypes["223_casing"]);

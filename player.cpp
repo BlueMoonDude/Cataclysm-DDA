@@ -3392,6 +3392,18 @@ void player::pause(game *g)
                            mfb(bp_eyes)|mfb(bp_mouth));
         }
     }
+
+    VehicleList vehs = g->m.get_vehicles();
+    vehicle* veh = NULL;
+    for (int v = 0; v < vehs.size(); ++v) {
+        veh = vehs[v].v;
+        if (veh && veh->velocity > 0 && veh->player_in_control(this)) {
+            if (one_in(10)) {
+                practice(g->turn, "driving", 1);
+            }
+            break;
+        }
+    }
 }
 
 int player::throw_range(signed char ch)
@@ -4697,9 +4709,9 @@ void player::suffer(game *g)
 
    bool power_armored = is_wearing_power_armor(&has_helmet);
 
-   if (power_armored && has_helmet) {
+   if ((power_armored && has_helmet) || is_wearing("hazmat_suit")|| is_wearing("anbc_suit")) {
      radiation += 0; // Power armor protects completely from radiation
-   } else if (power_armored || is_wearing("hazmat_suit")|| is_wearing("aep_suit")) {
+   } else if (power_armored || is_wearing("cleansuit")|| is_wearing("aep_suit")) {
      radiation += rng(0, localRadiation / 40);
    } else {
      radiation += rng(0, localRadiation / 16);
@@ -6326,7 +6338,7 @@ bool player::eat(game *g, signed char ch)
     }
 
     eaten->charges--;
-    if (eaten->charges <= 0)
+    if (eaten->charges <= 0 || eaten->is_book())
     {
         if (which == -1)
             weapon = ret_null;

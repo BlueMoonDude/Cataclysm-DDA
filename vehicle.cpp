@@ -239,21 +239,43 @@ void vehicle::init_state(game* g, int init_veh_fuel, int init_veh_status)
         }
     }
 }
-
 /**
  * Smashes up a vehicle that has already been placed; used for generating
- * very damaged vehicles.
+ * very damaged vehicles. Additionally, any spot where two vehicles overlapped
+ * (ie, any spot with multiple frames) will be completely destroyed, as that
+ * was the collision point.
  */
-void vehicle::smash()
-{
-  for (int part_index = 0; part_index < parts.size(); part_index++) {
-    //Drop by 10-120% of max HP (anything over 100 = broken)
-    int damage = (int) (dice(1, 12) * 0.1 * part_info(part_index).durability);
-    parts[part_index].hp -= damage;
-    if(parts[part_index].hp < 0) {
-      parts[part_index].hp = 0;
+void vehicle::smash() {
+    for (int part_index = 0; part_index < parts.size(); part_index++) {
+        //Skip any parts already mashed up
+        if(parts[part_index].hp == 0) {
+            continue;
+        }
+
+        vehicle_part next_part = parts[part_index];
+        std::vector<int> parts_in_square = parts_at_relative(next_part.mount_dx, next_part.mount_dy);
+        int structures_found = 0;
+        for (int square_part_index = 0; square_part_index < parts_in_square.size(); square_part_index++) {
+            if (part_info(parts_in_square[square_part_index]).location == "structure") {
+                structures_found++;
+            }
+        }
+
+        if(structures_found > 1) {
+            //Destroy everything in the square
+            for (int square_part_index = 0; square_part_index < parts_in_square.size(); square_part_index++) {
+                parts[parts_in_square[square_part_index]].hp = 0;
+            }
+            continue;
+        }
+
+        //Everywhere else, drop by 10-120% of max HP (anything over 100 = broken)
+        int damage = (int) (dice(1, 12) * 0.1 * part_info(part_index).durability);
+        parts[part_index].hp -= damage;
+        if (parts[part_index].hp < 0) {
+            parts[part_index].hp = 0;
+        }
     }
-  }
 }
 
 void vehicle::use_controls()
@@ -2586,8 +2608,9 @@ bool vehicle::fire_turret_internal (int p, it_gun &gun, it_ammo &ammo, int charg
     int closest = range + 1;
     for (int i = 0; i < g->num_zombies(); i++) {
         int dist = rl_dist( x, y, g->zombie(i).posx(), g->zombie(i).posy() );
-        if( g->zombie(i).friendly == 0 && dist < closest &&
-            g->m.sees(x, y, g->zombie(i).posx(), g->zombie(i).posy(), range, t) ) {
+        if (g->zombie(i).friendly == 0 && dist < closest &&
+              !g->zombie(i).is_hallucination() &&
+              g->m.sees(x, y, g->zombie(i).posx(), g->zombie(i).posy(), range, t) ) {
             target = &(g->zombie(i));
             closest = dist;
             fire_t = t;
@@ -2618,14 +2641,14 @@ bool vehicle::fire_turret_internal (int p, it_gun &gun, it_ammo &ammo, int charg
     }
     npc tmp;
     tmp.name = rmp_format(_("<veh_player>The %s"), part_info(p).name.c_str());
-    tmp.skillLevel(gun.skill_used).level(1);
-    tmp.skillLevel("gun").level(0);
+    tmp.skillLevel(gun.skill_used).level(8);
+    tmp.skillLevel("gun").level(4);
     tmp.recoil = abs(velocity) / 100 / 4;
     tmp.posx = x;
     tmp.posy = y;
     tmp.str_cur = 16;
-    tmp.dex_cur =  6;
-    tmp.per_cur =  8;
+    tmp.dex_cur = 8;
+    tmp.per_cur = 12;
     tmp.weapon = item(&gun, 0);
     it_ammo curam = ammo;
     tmp.weapon.curammo = &curam;
