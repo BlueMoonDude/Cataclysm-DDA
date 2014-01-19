@@ -329,6 +329,7 @@ GUN("bio_lightning", _("Chain Lightning"),  0,c_magenta, "steel", "plastic",
 
 std::string ammo_name(ammotype t)
 {
+    if( t == "939mm")       return_("9x39")
     if( t == "50")          return _(".50 BMG");
     if( t == "nail")        return _("nails");
     if( t == "BB" )         return _("BBs");
@@ -413,5 +414,6 @@ itype_id default_ammo(ammotype guntype)
     if( guntype == "UPS"  )         return _("UPS");
     if( guntype == "components"  )  return _("components");
     if( guntype == "50"  )          return "50bmg";
+    if( guntype == "939mm" )      return "9x39";
     return "null";
 }
