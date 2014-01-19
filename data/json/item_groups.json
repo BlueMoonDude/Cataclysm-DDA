@@ -1537,6 +1537,7 @@
     "type":"item_group",
     "id":"ammo",
     "items":[
+      ["939mm", 4],
       ["shot_bird", 8],
       ["shot_00", 8],
       ["shot_flechette", 3],
@@ -1628,7 +1629,8 @@
       ["ruger_mini", 12],
       ["savage_111f", 10],
       ["rm51_assault_rifle", 2],
-      ["rm88_battle_rifle", 1]
+      ["rm88_battle_rifle", 1],
+      ["sr3", 2]
     ]
   },{
     "type":"item_group",
